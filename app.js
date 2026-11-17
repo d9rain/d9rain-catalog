@@ -14,6 +14,7 @@
     config: { seller: '', channel: '', bot: null },
     q: '', cat: '', sizes: new Set(), sort: 'new', fav: new Set(), cart: new Set(),
     tab: 'catalog', scroll: {}, adminFilter: 'available', adminQ: '',
+    orders: [], ordersError: '', orderFilter: 'active', orderGroup: 'orders', orderQ: '', orderDraft: null,
   };
 
   const SIZE_ORDER = ['XXS', 'XS', 'S', 'M', 'L', 'XL', '2XL', '3XL', '4XL', '5XL', 'One Size'];
@@ -47,6 +48,7 @@
   const HEART = svg('M12 20.5 4.6 13a4.9 4.9 0 0 1 7-6.9l.4.4.4-.4a4.9 4.9 0 0 1 7 6.9z');
   const CHEVRON = svg('m9 6 6 6-6 6');
   const BACK = svg('m14 6-6 6 6 6');
+  const CLOSE = svg('M6 6l12 12M18 6 6 18');
 
   const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const norm = (s) => String(s || '').toLowerCase().replace(/ё/g, 'е');
@@ -111,8 +113,8 @@
   }
   const b64encode = (str) => { const b = new TextEncoder().encode(str); let out = ''; for (let i = 0; i < b.length; i += 0x8000) out += String.fromCharCode.apply(null, b.subarray(i, i + 0x8000)); return btoa(out); };
   const b64decode = (b64) => new TextDecoder().decode(Uint8Array.from(atob(b64.replace(/\s/g, '')), (c) => c.charCodeAt(0)));
-  async function gh(method, path, body, token) {
-    const res = await fetch(`${GH_API}/repos/${repoPath()}${path}`, {
+  async function gh(method, path, body, token, repo) {
+    const res = await fetch(`${GH_API}/repos/${repo || repoPath()}${path}`, {
       method, cache: 'no-store',
       headers: Object.assign({ Accept: 'application/vnd.github+json', Authorization: 'Bearer ' + (token || ghToken) }, body ? { 'content-type': 'application/json' } : {}),
       body: body ? JSON.stringify(body) : undefined,
@@ -231,6 +233,7 @@
     state.admin = true;
     loadParser();
     applyCatalog((await readCatalog()).data); // владелец всегда видит самую свежую версию
+    loadOrders().then(() => { if (state.admin) renderAdmin(); });
   }
   function signOut() { ghToken = ''; storeToken(''); state.admin = false; }
 
@@ -346,6 +349,309 @@
           h('div', { class: 'row-title' }, it.title),
           h('div', { class: 'row-sub' }, [it.price ? money(it.price) : 'цена по запросу', sizeLabel(it)].filter(Boolean).join(', ')))),
       h('button', { class: 'cart-del', type: 'button', 'aria-label': 'Убрать из корзины', onclick: () => toggleCart(it.id) }, '×'))));
+  }
+
+  // ---------- заказы под заказ ----------
+  // Данные лежат в ОТДЕЛЬНОМ ПРИВАТНОМ репозитории: каталог публичный, имена покупателей там видеть нельзя.
+  const ORDERS_REPO = 'd9rain/d9rain-orders';
+  const ORDERS_FILE = 'data/orders.json';
+  const ORDER_STATUS = [['ordered', 'Заказан'], ['bought', 'Выкуплен'], ['shipping', 'Едет'], ['stock', 'У меня'], ['done', 'Отдан'], ['canceled', 'Отменён']];
+  const ORDER_LABEL = {};
+  ORDER_STATUS.forEach((s) => { ORDER_LABEL[s[0]] = s[1]; });
+  const isOrderActive = (o) => o.status !== 'done' && o.status !== 'canceled';
+  const orderDebt = (o) => Math.max(0, (o.price || 0) - (o.paid || 0));
+  const daysAgo = (ts) => Math.max(0, Math.floor((nowSec() - (ts || nowSec())) / 86400));
+  const daysText = (n) => (n === 0 ? 'сегодня' : n + ' ' + plural(n, 'день', 'дня', 'дней'));
+
+  async function readOrdersFile() {
+    try {
+      const r = await gh('GET', '/contents/' + ORDERS_FILE, null, null, ORDERS_REPO);
+      const data = r && r.content ? JSON.parse(b64decode(r.content)) : { orders: [] };
+      if (!Array.isArray(data.orders)) data.orders = [];
+      return { data, sha: r && r.sha };
+    } catch (e) {
+      if (e.status === 404) return { data: { orders: [] }, sha: null };
+      throw e;
+    }
+  }
+  function ordersErrorText(e) {
+    if (e && (e.status === 404 || e.status === 403)) {
+      return 'Нет доступа к репозиторию заказов. Создайте приватный репозиторий ' + ORDERS_REPO +
+        ' и разрешите ключу доступ к нему (Contents: Read and write).';
+    }
+    return (e && e.message) || 'Не удалось загрузить заказы.';
+  }
+  async function loadOrders() {
+    if (!state.admin) return [];
+    try {
+      const { data } = await readOrdersFile();
+      state.orders = data.orders;
+      state.ordersError = '';
+    } catch (e) {
+      state.orders = [];
+      state.ordersError = ordersErrorText(e);
+    }
+    return state.orders;
+  }
+  async function mutateOrders(message, fn) {
+    for (let attempt = 0; attempt < 4; attempt++) {
+      const { data, sha } = await readOrdersFile();
+      const result = fn(data);
+      const body = { message, content: b64encode(JSON.stringify(data)) };
+      if (sha) body.sha = sha;
+      try {
+        await gh('PUT', '/contents/' + ORDERS_FILE, body, null, ORDERS_REPO);
+        state.orders = data.orders;
+        state.ordersError = '';
+        return result;
+      } catch (e) {
+        if (e.status !== 409 && e.status !== 422) throw e;
+      }
+    }
+    throw new Error('Не удалось сохранить заказы — попробуйте ещё раз');
+  }
+  async function putOrderPhoto(id, base64) {
+    await gh('PUT', '/contents/photos/' + encodeURIComponent(id) + '.jpg', { message: 'Фото заказа ' + id, content: base64 }, null, ORDERS_REPO);
+    return 'photos/' + id + '.jpg';
+  }
+  const orderPhotos = new Map();
+  async function orderPhotoUrl(path) {
+    if (orderPhotos.has(path)) return orderPhotos.get(path);
+    try {
+      const r = await gh('GET', '/contents/' + path.split('/').map(encodeURIComponent).join('/'), null, null, ORDERS_REPO);
+      const url = 'data:image/jpeg;base64,' + String((r && r.content) || '').replace(/\s/g, '');
+      orderPhotos.set(path, url);
+      return url;
+    } catch (e) { return ''; }
+  }
+  function orderThumb(o) {
+    const box = h('div', { class: 'ord-photo' });
+    const linked = o.itemId ? state.byId.get(String(o.itemId)) : null;
+    if (linked) {
+      const img = thumbImg(linked);
+      if (img) box.append(img);
+    } else if (o.photo) {
+      const img = h('img', { alt: '', loading: 'lazy' });
+      orderPhotoUrl(o.photo).then((u) => { if (u) img.src = u; });
+      box.append(img);
+    }
+    return box;
+  }
+  function orderRow(o, hideBuyer) {
+    const debt = orderDebt(o);
+    const st = ORDER_LABEL[o.status] ? o.status : 'ordered';
+    return h('a', { class: 'ord-row', href: '#order/' + o.id },
+      orderThumb(o),
+      h('div', { class: 'ord-main' },
+        hideBuyer ? null : h('div', { class: 'ord-buyer' }, o.buyer || 'Без имени',
+          o.username ? h('span', { class: 'ord-user' }, ' @' + o.username) : null),
+        h('div', { class: hideBuyer ? 'ord-buyer' : 'ord-title' }, o.title || 'Без названия'),
+        h('div', { class: 'ord-meta' },
+          [o.price ? money(o.price) : 'без цены', o.size || '', debt ? 'долг ' + money(debt) : ''].filter(Boolean).join(' · '))),
+      h('div', { class: 'ord-side' },
+        h('span', { class: 'ord-status st-' + st }, ORDER_LABEL[st]),
+        h('span', { class: 'ord-days' }, daysText(daysAgo(o.date)))));
+  }
+
+  function renderOrders() {
+    const root = $('orders-sheet');
+    const q = norm(state.orderQ);
+    let list = state.orders.slice();
+    if (state.orderFilter === 'active') list = list.filter(isOrderActive);
+    else if (state.orderFilter === 'done') list = list.filter((o) => o.status === 'done');
+    if (q) list = list.filter((o) => norm([o.buyer, o.username, o.title].join(' ')).indexOf(q) >= 0);
+    list.sort((a, b) => (b.date || 0) - (a.date || 0));
+
+    const search = h('input', { type: 'search', placeholder: 'Ник или вещь', value: state.orderQ, 'aria-label': 'Поиск по заказам' });
+    search.addEventListener('input', () => { state.orderQ = search.value; renderOrders(); });
+
+    const seg = (key, items) => h('div', { class: 'seg' }, items.map(([val, label]) =>
+      h('button', { type: 'button', 'aria-pressed': state[key] === val, onclick: () => { state[key] = val; renderOrders(); } }, label)));
+
+    let body;
+    if (state.ordersError) {
+      body = h('div', { class: 'empty' },
+        h('p', { class: 'empty-title' }, 'Заказы недоступны'),
+        h('p', {}, state.ordersError),
+        h('button', { class: 'btn btn-quiet', type: 'button', onclick: (e) => { e.currentTarget.disabled = true; loadOrders().then(renderOrders); } }, 'Проверить снова'));
+    } else if (!list.length) {
+      body = h('div', { class: 'empty' },
+        h('p', { class: 'empty-title' }, state.orders.length ? 'Ничего не найдено' : 'Заказов пока нет'),
+        h('p', {}, state.orders.length ? 'Измените фильтр или поиск.' : 'Нажмите «+ Заказ», чтобы записать первый.'));
+    } else if (state.orderGroup === 'people') {
+      const groups = [];
+      const map = new Map();
+      list.forEach((o) => {
+        const key = norm(o.username || o.buyer || 'без имени');
+        if (!map.has(key)) { map.set(key, []); groups.push(map.get(key)); }
+        map.get(key).push(o);
+      });
+      body = h('div', { class: 'ord-groups' }, groups.map((orders) => {
+        const head = orders[0];
+        const sum = orders.reduce((s, o) => s + (o.price || 0), 0);
+        const debt = orders.reduce((s, o) => s + orderDebt(o), 0);
+        return h('section', { class: 'ord-group' },
+          h('div', { class: 'ord-group-head' },
+            h('b', {}, head.buyer || 'Без имени'),
+            head.username ? h('span', { class: 'ord-user' }, '@' + head.username) : null,
+            h('span', { class: 'ord-group-sum' }, money(sum) + (debt ? ' · долг ' + money(debt) : ''))),
+          ...orders.map((o) => orderRow(o, true)));
+      }));
+    } else {
+      body = h('div', { class: 'ord-list' }, list.map(orderRow));
+    }
+
+    root.replaceChildren(
+      h('div', { class: 'sheet-head no-back' },
+        h('h1', {}, 'Заказы'),
+        h('button', { class: 'icon-btn', type: 'button', 'aria-label': 'Закрыть', html: CLOSE, onclick: goBack })),
+      h('div', { class: 'sheet-inner orders-inner' },
+        h('label', { class: 'search' }, h('span', { html: svg('m20 20-3.6-3.6', '<circle cx="11" cy="11" r="7"/>') }), search),
+        seg('orderFilter', [['active', 'Активные'], ['done', 'Отданные'], ['all', 'Все']]),
+        seg('orderGroup', [['orders', 'По заказам'], ['people', 'По людям']]),
+        body),
+      h('div', { class: 'sheet-foot' },
+        h('button', { class: 'btn', type: 'button', onclick: () => { state.orderDraft = null; location.hash = '#order/new'; } }, '+ Заказ')));
+    root.scrollTop = 0;
+  }
+
+  function renderOrderEditor(id) {
+    const root = $('order-sheet');
+    const isNew = id === 'new';
+    const src = isNew ? null : state.orders.find((o) => String(o.id) === String(id));
+    if (!isNew && !src) {
+      root.replaceChildren(h('div', { class: 'sheet-inner form' }, h('p', {}, 'Заказ не найден.')));
+      return;
+    }
+    const d = isNew
+      ? Object.assign({ id: null, buyer: '', username: '', title: '', size: '', price: null, paid: 0, status: 'ordered', note: '', itemId: '', photo: '' }, state.orderDraft || {})
+      : JSON.parse(JSON.stringify(src));
+    state.orderDraft = null;
+
+    const f = {
+      buyer: h('input', { type: 'text', value: d.buyer || '', placeholder: 'Как зовут в Telegram', maxlength: 80 }),
+      username: h('input', { type: 'text', value: d.username || '', placeholder: 'd9drain (без @)', autocapitalize: 'off', spellcheck: 'false', maxlength: 40 }),
+      title: h('input', { type: 'text', value: d.title || '', placeholder: 'Худи Vetements', maxlength: 200 }),
+      size: h('input', { type: 'text', value: d.size || '', placeholder: 'L', maxlength: 100 }),
+      price: h('input', { type: 'text', inputmode: 'numeric', value: d.price || '', placeholder: '45000' }),
+      paid: h('input', { type: 'text', inputmode: 'numeric', value: d.paid || '', placeholder: '0' }),
+      note: h('textarea', { placeholder: 'Сроки, пожелания, что уточнить', maxlength: 2000 }),
+    };
+    f.note.value = d.note || '';
+
+    const debtLine = h('div', { class: 'field-hint ord-debt' });
+    const refreshDebt = () => {
+      const price = parseInt(String(f.price.value).replace(/\D/g, ''), 10) || 0;
+      const paid = parseInt(String(f.paid.value).replace(/\D/g, ''), 10) || 0;
+      debtLine.textContent = price
+        ? (paid >= price ? 'Оплачено полностью' : 'Долг: ' + money(price - paid))
+        : 'Укажите цену, чтобы видеть долг';
+    };
+    f.price.addEventListener('input', refreshDebt);
+    f.paid.addEventListener('input', refreshDebt);
+    refreshDebt();
+
+    const segStatus = h('div', { class: 'fchips' });
+    const drawStatus = () => {
+      segStatus.replaceChildren(...ORDER_STATUS.map(([val, label]) =>
+        h('button', { class: 'fchip', type: 'button', 'aria-pressed': d.status === val, onclick: () => { d.status = val; drawStatus(); } }, label)));
+    };
+    drawStatus();
+
+    let photoBase64 = '';
+    const photoBox = h('div', { class: 'ph' });
+    const drawPhoto = () => {
+      photoBox.replaceChildren();
+      const linked = d.itemId ? state.byId.get(String(d.itemId)) : null;
+      if (photoBase64) photoBox.append(h('img', { src: 'data:image/jpeg;base64,' + photoBase64, alt: '' }));
+      else if (linked && thumbImg(linked)) photoBox.append(thumbImg(linked));
+      else if (d.photo) {
+        const img = h('img', { alt: '' });
+        orderPhotoUrl(d.photo).then((u) => { if (u) img.src = u; });
+        photoBox.append(img);
+      }
+    };
+    drawPhoto();
+
+    const fileInput = h('input', { type: 'file', accept: 'image/*' });
+    fileInput.addEventListener('change', async () => {
+      const file = fileInput.files && fileInput.files[0];
+      if (!file) return;
+      try {
+        const img = await loadImage(file);
+        photoBase64 = shrink(img, 700, 0.72).data;
+        d.itemId = '';
+        drawPhoto();
+      } catch (e) { toast(e.message, true); }
+    });
+
+    const saveBtn = h('button', { class: 'btn', type: 'button', onclick: save }, 'Сохранить');
+    async function save() {
+      saveBtn.disabled = true;
+      try {
+        const price = parseInt(String(f.price.value).replace(/\D/g, ''), 10) || 0;
+        const paid = parseInt(String(f.paid.value).replace(/\D/g, ''), 10) || 0;
+        const body = {
+          buyer: f.buyer.value.trim(), username: f.username.value.trim().replace(/^@/, ''),
+          title: f.title.value.trim(), size: f.size.value.trim(),
+          price, paid, status: d.status || 'ordered',
+          note: f.note.value.trim(), itemId: d.itemId || '',
+        };
+        if (!body.title) { toast('Укажите вещь', true); f.title.focus(); saveBtn.disabled = false; return; }
+        const oid = d.id || rid('o');
+        body.photo = photoBase64 ? await putOrderPhoto(oid, photoBase64) : (d.photo || '');
+        if (d.id) {
+          await mutateOrders('Правка заказа: ' + (body.title || body.buyer), (data) => {
+            const o = data.orders.find((x) => String(x.id) === String(d.id));
+            if (o) Object.assign(o, body, { updated: nowSec() });
+          });
+        } else {
+          await mutateOrders('Новый заказ: ' + (body.title || body.buyer), (data) => {
+            data.orders.push(Object.assign({ id: oid, date: nowSec(), updated: nowSec() }, body));
+          });
+        }
+        haptic('ok');
+        toast('Заказ сохранён');
+        goBack();
+      } catch (e) { toast(ordersErrorText(e), true); haptic('error'); }
+      saveBtn.disabled = false;
+    }
+
+    async function remove() {
+      if (!(await confirmBox('Удалить этот заказ?'))) return;
+      try {
+        await mutateOrders('Удалён заказ ' + (d.title || d.buyer || d.id), (data) => {
+          const i = data.orders.findIndex((x) => String(x.id) === String(d.id));
+          if (i >= 0) data.orders.splice(i, 1);
+        });
+        toast('Заказ удалён');
+        goBack();
+      } catch (e) { toast(ordersErrorText(e), true); }
+    }
+
+    const field = (label, control, hint) => h('label', { class: 'field' }, h('span', {}, label), control, hint ? h('div', { class: 'field-hint' }, hint) : null);
+
+    root.replaceChildren(h('div', { class: 'sheet-inner form' },
+      backBtn(),
+      h('h1', {}, isNew ? 'Новый заказ' : 'Заказ'),
+      h('div', { class: 'ord-photo-edit' },
+        photoBox,
+        h('div', {},
+          h('label', { class: 'btn btn-quiet', style: 'display:inline-flex;min-height:44px;padding:0 16px;' }, fileInput, 'Загрузить фото'),
+          h('div', { class: 'ord-photo-hint' }, d.itemId ? 'Фото берётся из каталога' : 'Своё фото, если вещи нет в каталоге'))),
+      h('div', { class: 'field' }, h('span', {}, 'Статус'), segStatus),
+      field('Покупатель', f.buyer, 'Имя, как в переписке'),
+      field('Ник в Telegram', f.username, 'Без @ — чтобы быстро написать'),
+      field('Вещь', f.title),
+      field('Размер', f.size),
+      field('Цена, ₽', f.price),
+      field('Предоплата, ₽', f.paid),
+      debtLine,
+      field('Заметка', f.note),
+      d.username ? h('div', {}, ext({ class: 'post-link' }, 'https://t.me/' + d.username, 'Написать @' + d.username)) : null,
+      isNew ? null : h('div', { class: 'form-foot' }, h('button', { class: 'btn btn-danger', type: 'button', onclick: remove }, 'Удалить заказ')),
+      h('div', { class: 'item-bar' }, saveBtn)));
+    root.scrollTop = 0;
   }
 
   // ---------- пост в канале ----------
@@ -613,7 +919,15 @@
         specs.length ? h('dl', { class: 'specs' }, specs.map((r) => h('div', {}, h('dt', {}, r[0]), h('dd', {}, r[1])))) : null,
         it.description ? h('p', { class: 'desc', html: linkify(it.description) }) : null,
         post ? ext({ class: 'post-link' }, post, 'Открыть пост в канале') : null,
-        state.admin ? h('div', {}, h('a', { class: 'post-link', href: '#edit/' + it.id }, 'Редактировать вещь')) : null),
+        state.admin ? h('div', {},
+          h('a', { class: 'post-link', href: '#edit/' + it.id }, 'Редактировать вещь'),
+          h('button', {
+            class: 'post-link', type: 'button', style: 'margin-left:16px',
+            onclick: () => {
+              state.orderDraft = { itemId: it.id, title: it.title, size: sizeLabel(it), price: it.price || 0 };
+              location.hash = '#order/new';
+            },
+          }, 'Записать в заказы')) : null),
       h('div', { class: 'item-bar' },
         h('button', { class: 'heart-lg', type: 'button', 'data-fav': it.id, 'aria-pressed': state.fav.has(it.id), 'aria-label': 'В избранное', html: HEART, onclick: (e) => toggleFav(it.id, e.currentTarget) }),
         sold && it.status === 'sold'
@@ -626,7 +940,14 @@
     const hash = location.hash.replace(/^#/, '');
     if (hash === 'sizes') return backToFilters();
     if (hash === 'filters') return closeSheets();
+    if (hash.indexOf('order/') === 0) { if (state.depth > 1) { state.depth--; history.back(); } else location.replace('#orders'); return; }
+    if (hash === 'orders') return backToAdmin();
     if (history.length > 1 && state.depth > 0) history.back(); else location.hash = '';
+  }
+  function backToAdmin() {
+    state.depth = 0;
+    history.replaceState(null, '', state.admin ? '#admin' : location.pathname + location.search);
+    route();
   }
 
   // ---------- шторки фильтров ----------
@@ -666,6 +987,8 @@
       h('div', { class: 'admin-actions' },
         h('a', { class: 'btn', href: '#edit/new' }, 'Добавить вещь'),
         h('a', { class: 'btn btn-quiet', href: '#editinfo' }, 'Текст «Инфо»')),
+      h('div', { class: 'admin-actions' },
+        h('a', { class: 'btn btn-quiet', href: '#orders' }, 'Заказы под заказ')),
       h('label', { class: 'search' }, h('span', { html: svg('m20 20-3.6-3.6', '<circle cx="11" cy="11" r="7"/>') }), search),
       h('div', { class: 'seg' }, seg),
       rows));
@@ -882,18 +1205,21 @@
     const hash = location.hash.replace(/^#/, '');
     const [name, arg] = hash.split('/');
     const isSheet = name === 'filters' || name === 'sizes';
-    const overlay = name === 'item' ? 'item' : isSheet ? 'filters'
+    const isOrders = name === 'orders' || name === 'order';
+    const overlay = name === 'item' ? 'item' : isSheet ? 'filters' : isOrders ? 'orders'
       : name === 'owner' && !state.admin && !DEMO ? 'editor' : (name === 'edit' || name === 'editinfo') && state.admin ? 'editor' : null;
     $('item').hidden = overlay !== 'item';
     $('editor').hidden = overlay !== 'editor';
     $('filters-sheet').hidden = name !== 'filters';
     $('sizes-sheet').hidden = name !== 'sizes';
+    $('orders-sheet').hidden = name !== 'orders';
+    $('order-sheet').hidden = name !== 'order';
     document.body.style.overflow = overlay ? 'hidden' : '';
     $('tabbar').hidden = !!overlay;
     if (inTg && tg.BackButton) { if (overlay) tg.BackButton.show(); else tg.BackButton.hide(); }
 
     if (overlay === 'filters') return; // содержимое шторок уже отрисовано в renderFilters()
-    if (overlay === 'item') return renderItem(arg);
+    if (overlay === 'orders') return name === 'orders' ? renderOrders() : renderOrderEditor(arg);
     if (overlay === 'editor') return name === 'owner' ? renderOwnerLogin() : name === 'editinfo' ? renderInfoEditor() : renderEditor(arg);
 
     state.depth = 0;
@@ -921,8 +1247,8 @@
       const href = a.getAttribute('href') || '';
       if (!href.startsWith('#')) return;
       e.preventDefault();
-      const isOverlay = /^#(item|edit|owner)/.test(href);
-      const onOverlay = /^#(item|edit|owner)/.test(location.hash);
+      const isOverlay = /^#(item|edit|owner|order)/.test(href);
+      const onOverlay = /^#(item|edit|owner|order)/.test(location.hash);
       if (isOverlay && !onOverlay) { state.depth++; location.hash = href; }
       else { history.replaceState(null, '', href || location.pathname + location.search); if (!isOverlay) state.depth = 0; route(); }
       if (a.dataset.tab && a.dataset.tab === state.tab && !isOverlay) window.scrollTo({ top: 0, behavior: 'smooth' });

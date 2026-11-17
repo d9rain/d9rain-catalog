@@ -242,6 +242,36 @@ button.tag[aria-pressed="true"] { color: var(--ink); background: radial-gradient
 .cart-del { flex: none; width: 44px; height: 44px; font-size: 22px; line-height: 1; color: var(--hint); }
 .cart-total { flex: none; font-size: 17px; font-weight: 800; font-variant-numeric: tabular-nums; padding-right: 2px; }
 
+/* ---------- заказы (видит только владелец) ---------- */
+.orders-inner { padding-left: var(--pad); padding-right: var(--pad); padding-bottom: calc(100px + var(--safe-b)); }
+.ord-list, .ord-groups { margin-top: 8px; }
+.ord-row { display: flex; gap: 12px; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--line); }
+.ord-photo { flex: none; width: 54px; height: 72px; border-radius: 8px; overflow: hidden; background: var(--surface); }
+.ord-photo img { width: 100%; height: 100%; object-fit: cover; }
+.ord-main { flex: 1; min-width: 0; }
+.ord-buyer { font-weight: 600; font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ord-user { color: var(--link); font-weight: 400; font-size: 13px; }
+.ord-title { margin-top: 2px; font-size: 13.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ord-meta { margin-top: 3px; font-size: 12.5px; color: var(--hint); }
+.ord-side { flex: none; display: flex; flex-direction: column; align-items: flex-end; gap: 5px; }
+.ord-status { font-size: 11px; font-weight: 700; padding: 3px 8px; border-radius: 5px; white-space: nowrap; }
+.ord-days { font-size: 11.5px; color: var(--hint); white-space: nowrap; }
+.st-ordered { background: rgba(240, 198, 117, 0.16); color: #f0c675; }
+.st-bought { background: rgba(143, 195, 245, 0.16); color: #8fc3f5; }
+.st-shipping { background: rgba(168, 184, 240, 0.16); color: #a8b8f0; }
+.st-stock { background: rgba(134, 224, 168, 0.16); color: #86e0a8; }
+.st-done { background: rgba(139, 149, 163, 0.16); color: #8b95a3; }
+.st-canceled { background: rgba(229, 116, 133, 0.16); color: #e57485; }
+.ord-group { margin-top: 20px; }
+.ord-group-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; padding-bottom: 6px; border-bottom: 1px solid var(--line); }
+.ord-group-sum { margin-left: auto; font-size: 13px; color: var(--hint); font-variant-numeric: tabular-nums; }
+.ord-debt { color: #f0c675; }
+.ord-photo-edit { display: flex; gap: 12px; align-items: center; margin-top: 16px; }
+.ord-photo-edit .ph { width: 90px; height: 120px; flex: none; border-radius: 8px; }
+.ord-photo-edit label { flex: 1; }
+.ord-photo-edit input[type="file"] { display: none; }
+.ord-photo-hint { font-size: 13px; color: var(--hint); margin-top: 6px; }
+
 /* ---------- инфо ---------- */
 .info { padding: 16px var(--pad) 8px; max-width: 640px; margin: 0 auto; }
 .info-head { display: flex; align-items: center; gap: 18px; }
