@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="color-scheme" content="dark">
+<title>D9rain — вещи в наличии</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<main id="app">
+  <section id="view-catalog" class="view" aria-label="Каталог">
+    <header class="top">
+      <div class="top-row">
+        <span class="ava"><b>D9</b><img src="avatar.jpg" alt="" onerror="this.remove()"></span>
+        <h1 class="wordmark">D9rain</h1>
+        <span class="top-note">вещи в наличии</span>
+      </div>
+      <label class="search">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.6-3.6"/></svg>
+        <input id="q" type="search" placeholder="Бренд, вещь, артист" autocomplete="off" enterkeyhint="search" aria-label="Поиск по каталогу">
+        <button type="button" id="q-clear" class="search-clear" hidden aria-label="Очистить поиск">×</button>
+      </label>
+      <nav id="cats" class="cats" aria-label="Тип вещи"></nav>
+      <div id="sizes" class="sizes" role="group" aria-label="Размер"></div>
+      <div class="result-row">
+        <span id="count" class="count"></span>
+        <button type="button" id="reset" class="link-btn" hidden>Сбросить фильтры</button>
+        <select id="sort" class="sort" aria-label="Сортировка">
+          <option value="new">Сначала новые</option>
+          <option value="cheap">Сначала дешевле</option>
+          <option value="dear">Сначала дороже</option>
+        </select>
+      </div>
+    </header>
+    <div id="grid" class="grid"></div>
+    <div id="empty" class="empty" hidden>
+      <p class="empty-title">Ничего не нашлось</p>
+      <p>Попробуйте другой запрос или уберите часть фильтров.</p>
+      <button type="button" class="btn btn-quiet" id="empty-reset">Сбросить фильтры</button>
+    </div>
+  </section>
+
+  <section id="view-fav" class="view" hidden aria-label="Избранное">
+    <header class="top top-simple"><h1 class="page-title">Избранное</h1></header>
+    <div id="fav-grid" class="grid"></div>
+    <div id="fav-empty" class="empty" hidden>
+      <p class="empty-title">Пока пусто</p>
+      <p>Нажмите на сердечко у вещи — она появится здесь, и вы быстро к ней вернётесь.</p>
+      <a class="btn btn-quiet" href="#">Перейти в каталог</a>
+    </div>
+  </section>
+
+  <section id="view-info" class="view" hidden aria-label="Инфо"></section>
+  <section id="view-admin" class="view" hidden aria-label="Управление"></section>
+</main>
+
+<div id="item" class="sheet" hidden aria-label="Вещь"></div>
+<div id="editor" class="sheet" hidden aria-label="Редактирование"></div>
+
+<nav id="tabbar" class="tabbar" aria-label="Разделы">
+  <a href="#" data-tab="catalog"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z"/></svg><span>Каталог</span></a>
+  <a href="#fav" data-tab="fav"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20.5 4.6 13a4.9 4.9 0 0 1 7-6.9l.4.4.4-.4a4.9 4.9 0 0 1 7 6.9z"/></svg><span>Избранное<i id="fav-badge" class="badge" hidden></i></span></a>
+  <a href="#info" data-tab="info"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 11v5.5M12 7.6v.2"/></svg><span>Инфо</span></a>
+  <a href="#admin" data-tab="admin" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2"/><circle cx="8" cy="17" r="2"/></svg><span>Управление</span></a>
+</nav>
+
+<div id="toast" class="toast" role="status" hidden></div>
+<div id="boot" class="boot">Загружаем каталог…</div>
+<script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,62 @@
+name: Каталог
+# Раз в 15 минут забирает новые посты канала и обновляет сайт.
+# Также обновляет сайт после каждой правки из «Управления» (это push в репозиторий).
+on:
+  push:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+concurrency:
+  group: catalog
+  cancel-in-progress: false
+jobs:
+  catalog:
+    if: github.ref_name == github.event.repository.default_branch
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+
+      - name: Забрать новые посты у бота
+        if: github.event_name != 'push'
+        run: node sync/sync.js
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          ADMIN_IDS: ${{ vars.ADMIN_IDS }}
+
+      - name: Сохранить изменения
+        id: commit
+        if: github.event_name != 'push'
+        run: |
+          git config user.name "d9rain-bot"
+          git config user.email "d9rain-bot@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then echo "changed=false" >> "$GITHUB_OUTPUT"; exit 0; fi
+          git commit -m "Синхронизация с каналом"
+          git pull --rebase
+          git push
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Подготовить сайт
+        if: github.event_name != 'schedule' || steps.commit.outputs.changed == 'true'
+        uses: actions/configure-pages@v5
+
+      - name: Упаковать сайт
+        if: github.event_name != 'schedule' || steps.commit.outputs.changed == 'true'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: .
+
+      - name: Опубликовать сайт
+        id: deploy
+        if: github.event_name != 'schedule' || steps.commit.outputs.changed == 'true'
+        uses: actions/deploy-pages@v4
