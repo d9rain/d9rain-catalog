@@ -47,7 +47,6 @@
   const HEART = svg('M12 20.5 4.6 13a4.9 4.9 0 0 1 7-6.9l.4.4.4-.4a4.9 4.9 0 0 1 7 6.9z');
   const CHEVRON = svg('m9 6 6 6-6 6');
   const BACK = svg('m14 6-6 6 6 6');
-  const SHARE = svg('M12 16V4M8 8l4-4 4 4M5 13v7h14v-7');
 
   const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const norm = (s) => String(s || '').toLowerCase().replace(/ё/g, 'е');
@@ -309,9 +308,8 @@
     document.querySelectorAll('[data-cart]').forEach((b) => {
       const on = state.cart.has(b.dataset.cart);
       b.setAttribute('aria-pressed', on);
-      b.classList.toggle('btn-quiet', on);
       const label = b.querySelector('span');
-      if (label) label.textContent = on ? 'В корзине' : 'В корзину';
+      if (label) label.textContent = on ? '✓ В корзине' : 'В корзину';
     });
     const n = cartItems().length;
     $('cart-badge').hidden = !n;
@@ -320,11 +318,14 @@
   }
   function cartText() {
     const list = cartItems();
-    const shown = list.slice(0, 15);
-    const lines = shown.map((it, n) => {
+    const shown = list.slice(0, 10);
+    const lines = [];
+    shown.forEach((it, n) => {
       const size = sizeLabel(it) ? ' (' + sizeLabel(it) + ')' : '';
       const price = it.price ? money(it.price) : 'цена по запросу';
-      return `${n + 1}. ${it.title}${size} — ${price}`;
+      lines.push(`${n + 1}. ${it.title}${size} — ${price}`);
+      const link = postUrl(it);
+      if (link) lines.push('   ' + link);
     });
     if (list.length > shown.length) lines.push(`…и ещё ${list.length - shown.length}`);
     const total = list.reduce((s, i) => s + (i.price || 0), 0);
@@ -347,15 +348,10 @@
       h('button', { class: 'cart-del', type: 'button', 'aria-label': 'Убрать из корзины', onclick: () => toggleCart(it.id) }, '×'))));
   }
 
-  // ---------- поделиться вещью ----------
-  function itemUrl(it) { return location.origin + location.pathname + '#item/' + it.id; }
-  function shareItem(it) {
-    const url = itemUrl(it);
-    const text = it.title + (it.price ? ' — ' + money(it.price) : '');
-    const tgShare = 'https://t.me/share/url?url=' + encodeURIComponent(url) + '&text=' + encodeURIComponent(text);
-    if (inTg && tg.openTelegramLink) return tg.openTelegramLink(tgShare);
-    if (navigator.share) return navigator.share({ title: it.title, text, url }).catch(() => {});
-    openLink(tgShare);
+  // ---------- пост в канале ----------
+  // своей ссылки на сайт не отправляем: кнопка открывает сам пост, оттуда штатная «Пересылка»
+  function postUrl(it) {
+    return it.msgId && state.config.channel ? `https://t.me/${state.config.channel}/${it.msgId}` : '';
   }
 
   // ---------- карточки ----------
@@ -595,11 +591,12 @@
     const step = (d) => track.scrollBy({ left: d * track.clientWidth, behavior: 'smooth' });
     const sold = it.status !== 'available';
     const specs = [['Размер', it.size], ['Состояние', it.condition]].filter((r) => r[1]);
+    const post = postUrl(it);
     const inCart = state.cart.has(it.id);
     const cartBtn = h('button', {
-      class: 'btn' + (inCart ? ' btn-quiet' : ''), type: 'button', 'data-cart': it.id, 'aria-pressed': inCart,
+      class: 'btn btn-quiet', type: 'button', 'data-cart': it.id, 'aria-pressed': inCart,
       onclick: () => toggleCart(it.id),
-    }, h('span', {}, inCart ? 'В корзине' : 'В корзину'));
+    }, h('span', {}, inCart ? '✓ В корзине' : 'В корзину'));
 
     root.replaceChildren(h('div', { class: 'sheet-inner' },
       backBtn(),
@@ -615,11 +612,10 @@
         sold ? h('p', { class: 'sold-note' }, it.status === 'sold' ? 'Эта вещь уже продана.' : 'Вещь скрыта из каталога — её видите только вы.') : null,
         specs.length ? h('dl', { class: 'specs' }, specs.map((r) => h('div', {}, h('dt', {}, r[0]), h('dd', {}, r[1])))) : null,
         it.description ? h('p', { class: 'desc', html: linkify(it.description) }) : null,
-        it.msgId && state.config.channel ? ext({ class: 'post-link' }, `https://t.me/${state.config.channel}/${it.msgId}`, 'Открыть пост в канале') : null,
+        post ? ext({ class: 'post-link' }, post, 'Открыть пост в канале') : null,
         state.admin ? h('div', {}, h('a', { class: 'post-link', href: '#edit/' + it.id }, 'Редактировать вещь')) : null),
       h('div', { class: 'item-bar' },
         h('button', { class: 'heart-lg', type: 'button', 'data-fav': it.id, 'aria-pressed': state.fav.has(it.id), 'aria-label': 'В избранное', html: HEART, onclick: (e) => toggleFav(it.id, e.currentTarget) }),
-        h('button', { class: 'heart-lg', type: 'button', 'aria-label': 'Поделиться вещью', html: SHARE, onclick: () => shareItem(it) }),
         sold && it.status === 'sold'
           ? ext({ class: 'btn btn-quiet' }, sellerUrl(), 'Спросить о похожих')
           : [sold ? null : cartBtn, ext({ class: 'btn' }, sellerUrl(orderText(it)), 'Написать')])));
