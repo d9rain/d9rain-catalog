@@ -22,17 +22,27 @@
         <input id="q" type="search" placeholder="Бренд, вещь, артист" autocomplete="off" enterkeyhint="search" aria-label="Поиск по каталогу">
         <button type="button" id="q-clear" class="search-clear" hidden aria-label="Очистить поиск">×</button>
       </label>
-      <nav id="cats" class="cats" aria-label="Тип вещи"></nav>
-      <div id="sizes" class="sizes" role="group" aria-label="Размер"></div>
+      <nav id="cats" class="ribbon" aria-label="Тип вещи"></nav>
+      <div class="filterbar">
+        <button type="button" id="open-filters" class="plate" aria-haspopup="dialog">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M7 12h10M10 17h4"/></svg>
+          <span>Фильтры</span>
+          <i class="plate-badge" id="fcount" hidden></i>
+        </button>
+        <label class="plate plate-select">
+          <select id="sort" aria-label="Сортировка">
+            <option value="new">Сначала новые</option>
+            <option value="cheap">Сначала дешевле</option>
+            <option value="dear">Сначала дороже</option>
+          </select>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+        </label>
+      </div>
       <div class="result-row">
         <span id="count" class="count"></span>
         <button type="button" id="reset" class="link-btn" hidden>Сбросить фильтры</button>
-        <select id="sort" class="sort" aria-label="Сортировка">
-          <option value="new">Сначала новые</option>
-          <option value="cheap">Сначала дешевле</option>
-          <option value="dear">Сначала дороже</option>
-        </select>
       </div>
+      <div id="active" class="active-row"></div>
     </header>
     <div id="grid" class="grid"></div>
     <div id="empty" class="empty" hidden>
@@ -58,6 +68,47 @@
 
 <div id="item" class="sheet" hidden aria-label="Вещь"></div>
 <div id="editor" class="sheet" hidden aria-label="Редактирование"></div>
+
+<div id="filters-sheet" class="sheet" hidden role="dialog" aria-label="Фильтры">
+  <div class="sheet-head no-back">
+    <h1>Фильтры</h1>
+    <button type="button" class="icon-btn" id="close-filters" aria-label="Закрыть">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>
+    </button>
+  </div>
+  <div class="sheet-inner filter-sheet-inner">
+    <section class="fsec">
+      <div class="fsec-t">Тип вещи</div>
+      <div class="fchips" id="sheet-cats"></div>
+    </section>
+    <button type="button" class="rowlink" id="open-sizes">
+      <span class="rl-t">Размер</span>
+      <span class="rl-v" id="size-sum">любой</span>
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg>
+    </button>
+  </div>
+  <div class="sheet-foot">
+    <button type="button" class="btn btn-quiet" id="reset-sheet">Сбросить</button>
+    <button type="button" class="btn" id="done-filters">Показать <span id="cta-count"></span></button>
+  </div>
+</div>
+
+<div id="sizes-sheet" class="sheet" hidden role="dialog" aria-label="Размер">
+  <div class="sheet-head">
+    <button type="button" class="icon-btn sh-back" id="back-filters" aria-label="Назад">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14 6-6 6 6 6"/></svg>
+    </button>
+    <h1>Размер</h1>
+    <button type="button" class="icon-btn" id="close-sizes" aria-label="Закрыть">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>
+    </button>
+  </div>
+  <div class="sheet-inner filter-sheet-inner" id="sizes-list"></div>
+  <div class="sheet-foot">
+    <button type="button" class="btn btn-quiet" id="reset-sizes">Сбросить</button>
+    <button type="button" class="btn" id="done-sizes">Готово · <span id="size-count"></span></button>
+  </div>
+</div>
 
 <nav id="tabbar" class="tabbar" aria-label="Разделы">
   <a href="#" data-tab="catalog"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z"/></svg><span>Каталог</span></a>

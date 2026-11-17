@@ -307,19 +307,77 @@
     }
     return true;
   }
+  // короткие подписи для ленты: длинные названия категорий не влезают в один ряд
+  const SHORT_CAT = {
+    'Футболки': 'Футболки', 'Худи и зипки': 'Худи', 'Головные уборы': 'Кепки', 'Лонгсливы': 'Лонгсливы',
+    'Обувь': 'Обувь', 'Аксессуары': 'Аксессуары', 'Штаны': 'Штаны', 'Верхняя одежда': 'Верх', 'Другое': 'Другое',
+  };
+  const shortCat = (c) => SHORT_CAT[c] || c;
+  // размеры группируем по формату записи, а не по типу вещи: штаны бывают и W, и L/XL
+  function sizeGroups(list) {
+    return [
+      ['Буквы и One Size', list.filter((s) => !/^(EU |W\d)/.test(s) && !/^\d+\s+\d+\/\d+/.test(s))],
+      ['Головные уборы', list.filter((s) => /^\d+\s+\d+\/\d+/.test(s))],
+      ['Обувь (EU)', list.filter((s) => s.startsWith('EU '))],
+      ['Поясной размер (W)', list.filter((s) => /^W\d/.test(s))],
+    ].filter((g) => g[1].length);
+  }
+  function categoriesOf(all) {
+    const list = state.categories.filter((c) => all.some((i) => i.category === c));
+    all.forEach((i) => { if (!list.includes(i.category)) list.push(i.category); });
+    return list;
+  }
+  function popularCats(all) {
+    const n = {};
+    all.forEach((i) => { n[i.category] = (n[i.category] || 0) + 1; });
+    return categoriesOf(all).slice().sort((a, b) => (n[b] || 0) - (n[a] || 0)).slice(0, 3);
+  }
+
   function renderFilters() {
     const all = available();
-    const cats = state.categories.filter((c) => all.some((i) => i.category === c));
-    all.forEach((i) => { if (!cats.includes(i.category)) cats.push(i.category); });
+    const counts = {};
+    all.forEach((i) => { counts[i.category] = (counts[i.category] || 0) + 1; });
+    const cats = categoriesOf(all).slice().sort((a, b) => (counts[b] || 0) - (counts[a] || 0));
+    const pop = popularCats(all);
+
+    // лента в шапке: «Все», три ходовые категории и «Ещё»
+    const shown = pop.slice();
+    if (state.cat && !shown.includes(state.cat)) shown.unshift(state.cat);
     $('cats').replaceChildren(
       h('button', { class: 'cat', type: 'button', 'aria-pressed': !state.cat, onclick: () => setCat('') }, 'Все'),
-      ...cats.map((c) => h('button', { class: 'cat', type: 'button', 'aria-pressed': state.cat === c, onclick: () => setCat(c) }, c)));
+      ...shown.map((c) => h('button', { class: 'cat', type: 'button', 'aria-pressed': state.cat === c, onclick: () => setCat(c) }, shortCat(c))),
+      h('button', { class: 'cat cat-more', type: 'button', onclick: () => openSheet('filters') }, 'Ещё'));
+
+    // шторка «Тип вещи»
+    $('sheet-cats').replaceChildren(
+      h('button', { class: 'fchip', type: 'button', 'aria-pressed': !state.cat, onclick: () => setCat('') }, 'Все'),
+      ...cats.map((c) => h('button', { class: 'fchip', type: 'button', 'aria-pressed': state.cat === c, onclick: () => setCat(c) }, c)));
+
+    // экран размера
     const sizes = new Set();
     all.filter((i) => matches(i, 'size')).forEach((i) => (i.sizes || []).forEach((s) => sizes.add(s)));
     state.sizes.forEach((s) => sizes.add(s));
-    $('sizes').replaceChildren(...[...sizes].sort((a, b) => sizeRank(a) - sizeRank(b) || a.localeCompare(b))
-      .map((s) => h('button', { class: 'tag', type: 'button', 'aria-pressed': state.sizes.has(s), onclick: () => toggleSize(s) }, s)));
-    $('sizes').hidden = !sizes.size;
+    const sorted = [...sizes].sort((a, b) => sizeRank(a) - sizeRank(b) || a.localeCompare(b));
+    $('sizes-list').replaceChildren(...sizeGroups(sorted).map(([label, list]) => h('div', { class: 'sgroup' },
+      h('div', { class: 'sgroup-t' }, label),
+      h('div', { class: 'stags' }, list.map((s) => h('button', { class: 'tag', type: 'button', 'aria-pressed': state.sizes.has(s), onclick: () => toggleSize(s) }, s))))));
+
+    // сводка в строке «Размер» и счётчик на плашке
+    const chosen = [...state.sizes].sort((a, b) => sizeRank(a) - sizeRank(b));
+    const sum = $('size-sum');
+    sum.textContent = chosen.length ? chosen.join(', ') : 'любой';
+    sum.classList.toggle('is-on', chosen.length > 0);
+
+    const active = (state.cat ? 1 : 0) + state.sizes.size;
+    $('fcount').hidden = !active;
+    $('fcount').textContent = active;
+    $('open-filters').classList.toggle('is-on', active > 0);
+
+    // чипы выбранного под шапкой
+    const chips = [];
+    if (state.cat) chips.push(h('button', { class: 'fx', type: 'button', onclick: () => setCat('') }, shortCat(state.cat), h('b', {}, '×')));
+    chosen.forEach((s) => chips.push(h('button', { class: 'fx', type: 'button', onclick: () => toggleSize(s) }, s, h('b', {}, '×'))));
+    $('active').replaceChildren(...chips);
   }
   function setCat(c) { state.cat = c; haptic(); renderCatalog(); }
   function toggleSize(s) { if (state.sizes.has(s)) state.sizes.delete(s); else state.sizes.add(s); haptic(); renderCatalog(); }
@@ -336,7 +394,10 @@
     else list.sort((a, b) => b.date - a.date);
     $('grid').replaceChildren(...list.map(card));
     const filtered = !!(state.q || state.cat || state.sizes.size);
-    $('count').textContent = list.length + ' ' + plural(list.length, 'вещь', 'вещи', 'вещей');
+    const countText = list.length + ' ' + plural(list.length, 'вещь', 'вещи', 'вещей');
+    $('count').textContent = countText;
+    $('cta-count').textContent = countText;
+    $('size-count').textContent = countText;
     $('reset').hidden = !filtered;
     $('empty').hidden = list.length > 0;
     $('grid').hidden = !list.length;
@@ -474,7 +535,29 @@
     root.scrollTop = 0;
   }
   function backBtn() { return h('button', { class: 'back', type: 'button', 'aria-label': 'Назад', html: BACK, onclick: goBack }); }
-  function goBack() { if (history.length > 1 && state.depth > 0) history.back(); else location.hash = ''; }
+  function goBack() {
+    const hash = location.hash.replace(/^#/, '');
+    if (hash === 'sizes') return backToFilters();
+    if (hash === 'filters') return closeSheets();
+    if (history.length > 1 && state.depth > 0) history.back(); else location.hash = '';
+  }
+
+  // ---------- шторки фильтров ----------
+  function openSheet(name) {
+    if (location.hash === '#' + name) return;
+    state.depth++;
+    location.hash = '#' + name;
+  }
+  function closeSheets() {
+    state.depth = 0;
+    history.replaceState(null, '', location.pathname + location.search);
+    route();
+  }
+  function backToFilters() {
+    if (state.depth > 1) { state.depth--; history.back(); }
+    else location.replace('#filters');
+  }
+  function resetFilterSheet() { state.cat = ''; state.sizes.clear(); renderCatalog(); }
 
   // ---------- управление ----------
   function renderAdmin() {
@@ -710,13 +793,18 @@
   function route() {
     const hash = location.hash.replace(/^#/, '');
     const [name, arg] = hash.split('/');
-    const overlay = name === 'item' ? 'item' : name === 'owner' && !state.admin && !DEMO ? 'editor' : (name === 'edit' || name === 'editinfo') && state.admin ? 'editor' : null;
+    const isSheet = name === 'filters' || name === 'sizes';
+    const overlay = name === 'item' ? 'item' : isSheet ? 'filters'
+      : name === 'owner' && !state.admin && !DEMO ? 'editor' : (name === 'edit' || name === 'editinfo') && state.admin ? 'editor' : null;
     $('item').hidden = overlay !== 'item';
     $('editor').hidden = overlay !== 'editor';
+    $('filters-sheet').hidden = name !== 'filters';
+    $('sizes-sheet').hidden = name !== 'sizes';
     document.body.style.overflow = overlay ? 'hidden' : '';
     $('tabbar').hidden = !!overlay;
     if (inTg && tg.BackButton) { if (overlay) tg.BackButton.show(); else tg.BackButton.hide(); }
 
+    if (overlay === 'filters') return; // содержимое шторок уже отрисовано в renderFilters()
     if (overlay === 'item') return renderItem(arg);
     if (overlay === 'editor') return name === 'owner' ? renderOwnerLogin() : name === 'editinfo' ? renderInfoEditor() : renderEditor(arg);
 
@@ -751,6 +839,20 @@
       if (a.dataset.tab && a.dataset.tab === state.tab && !isOverlay) window.scrollTo({ top: 0, behavior: 'smooth' });
     });
     if (inTg && tg.BackButton) tg.BackButton.onClick(goBack);
+
+    // плашки и шторки фильтров
+    $('open-filters').addEventListener('click', () => openSheet('filters'));
+    $('open-sizes').addEventListener('click', () => openSheet('sizes'));
+    $('close-filters').addEventListener('click', closeSheets);
+    $('done-filters').addEventListener('click', closeSheets);
+    $('close-sizes').addEventListener('click', closeSheets);
+    $('back-filters').addEventListener('click', backToFilters);
+    $('done-sizes').addEventListener('click', backToFilters);
+    $('reset-sheet').addEventListener('click', resetFilterSheet);
+    $('reset-sizes').addEventListener('click', () => { state.sizes.clear(); renderCatalog(); });
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && /^#(filters|sizes)/.test(location.hash)) goBack();
+    });
 
     const q = $('q');
     let t;
