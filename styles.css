@@ -35,6 +35,10 @@ svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width:
 
 #app { padding-bottom: calc(var(--bar-h) + var(--safe-b) + 12px); min-height: 100vh; }
 .boot { position: fixed; inset: 0; display: grid; place-items: center; background: var(--bg); color: var(--hint); z-index: 50; }
+.boot-err { max-width: 320px; padding: 24px; text-align: center; }
+.boot-err .boot-title { margin-bottom: 8px; color: var(--text); font-size: 18px; font-weight: 600; }
+.boot-err p { margin-bottom: 10px; }
+.boot-err .btn { margin-top: 8px; }
 
 /* ---------- шапка каталога ---------- */
 .top { padding: 14px var(--pad) 0; }
@@ -226,8 +230,17 @@ button.tag[aria-pressed="true"] { color: var(--ink); background: radial-gradient
 .sold-note { margin-top: 12px; padding: 10px 12px; background: var(--surface); border-left: 3px solid var(--red); }
 
 .item-bar { position: fixed; z-index: 2; left: 0; right: 0; bottom: 0; display: flex; gap: 10px; padding: 10px var(--pad) calc(10px + var(--safe-b)); background: var(--bg); border-top: 1px solid var(--line); }
-.item-bar .btn { flex: 1; }
+.item-bar .btn { flex: 1; min-width: 0; padding: 0 12px; font-size: 14px; }
 .heart-lg { flex: none; width: 48px; height: 48px; border-radius: 10px; background: var(--surface); display: grid; place-items: center; }
+
+/* ---------- корзина ---------- */
+#view-cart { padding-bottom: 84px; }
+#cart-bar { bottom: calc(var(--bar-h) + var(--safe-b)); padding-bottom: 10px; z-index: 21; }
+.cart-list { padding: 0 var(--pad); max-width: 640px; margin: 0 auto; }
+.cart-row { display: flex; align-items: center; gap: 8px; border-bottom: 1px solid var(--line); }
+.cart-link { display: flex; align-items: center; gap: 12px; flex: 1; min-width: 0; padding: 10px 0; }
+.cart-del { flex: none; width: 44px; height: 44px; font-size: 22px; line-height: 1; color: var(--hint); }
+.cart-total { flex: none; font-size: 17px; font-weight: 800; font-variant-numeric: tabular-nums; padding-right: 2px; }
 
 /* ---------- инфо ---------- */
 .info { padding: 16px var(--pad) 8px; max-width: 640px; margin: 0 auto; }

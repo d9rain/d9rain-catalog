@@ -12,7 +12,7 @@
   const state = {
     items: [], byId: new Map(), info: { text: '', links: [] }, admin: false, categories: [],
     config: { seller: '', channel: '', bot: null },
-    q: '', cat: '', sizes: new Set(), sort: 'new', fav: new Set(),
+    q: '', cat: '', sizes: new Set(), sort: 'new', fav: new Set(), cart: new Set(),
     tab: 'catalog', scroll: {}, adminFilter: 'available', adminQ: '',
   };
 
@@ -47,6 +47,7 @@
   const HEART = svg('M12 20.5 4.6 13a4.9 4.9 0 0 1 7-6.9l.4.4.4-.4a4.9 4.9 0 0 1 7 6.9z');
   const CHEVRON = svg('m9 6 6 6-6 6');
   const BACK = svg('m14 6-6 6 6 6');
+  const SHARE = svg('M12 16V4M8 8l4-4 4 4M5 13v7h14v-7');
 
   const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const norm = (s) => String(s || '').toLowerCase().replace(/ё/g, 'е');
@@ -271,6 +272,90 @@
     $('fav-badge').hidden = !n;
     $('fav-badge').textContent = n;
     if (state.tab === 'fav') renderFav();
+  }
+
+  // ---------- корзина ----------
+  // набор вещей, которые покупатель хочет купить; отправляется продавцу одним сообщением
+  const CART_KEY = 'd9_cart';
+  function loadCart() {
+    try { state.cart = new Set(JSON.parse(localStorage.getItem(CART_KEY) || '[]').map(String)); } catch (e) { state.cart = new Set(); }
+    const cs = cloud();
+    if (!cs) return;
+    cs.getItem(CART_KEY, (err, value) => {
+      if (err || !value) return;
+      try { state.cart = new Set(JSON.parse(value).map(String)); } catch (e) { return; }
+      refreshCartUi();
+    });
+  }
+  function saveCart() {
+    const value = JSON.stringify([...state.cart].slice(-100));
+    try { localStorage.setItem(CART_KEY, value); } catch (e) { /* приватный режим */ }
+    const cs = cloud();
+    if (cs) cs.setItem(CART_KEY, value);
+  }
+  function cartItems() {
+    return [...state.cart].map((id) => state.byId.get(id)).filter((i) => i && i.status === 'available');
+  }
+  function toggleCart(id) {
+    id = String(id);
+    const had = state.cart.has(id);
+    if (had) state.cart.delete(id); else state.cart.add(id);
+    saveCart();
+    haptic();
+    toast(had ? 'Убрал из корзины' : 'Добавил в корзину');
+    refreshCartUi();
+  }
+  function refreshCartUi() {
+    document.querySelectorAll('[data-cart]').forEach((b) => {
+      const on = state.cart.has(b.dataset.cart);
+      b.setAttribute('aria-pressed', on);
+      b.classList.toggle('btn-quiet', on);
+      const label = b.querySelector('span');
+      if (label) label.textContent = on ? 'В корзине' : 'В корзину';
+    });
+    const n = cartItems().length;
+    $('cart-badge').hidden = !n;
+    $('cart-badge').textContent = n;
+    if (state.tab === 'cart') renderCart();
+  }
+  function cartText() {
+    const list = cartItems();
+    const shown = list.slice(0, 15);
+    const lines = shown.map((it, n) => {
+      const size = sizeLabel(it) ? ' (' + sizeLabel(it) + ')' : '';
+      const price = it.price ? money(it.price) : 'цена по запросу';
+      return `${n + 1}. ${it.title}${size} — ${price}`;
+    });
+    if (list.length > shown.length) lines.push(`…и ещё ${list.length - shown.length}`);
+    const total = list.reduce((s, i) => s + (i.price || 0), 0);
+    let text = 'Здравствуйте! Хочу купить:\n' + lines.join('\n');
+    if (total) text += '\n\nИтого: ' + money(total);
+    return text;
+  }
+  function renderCart() {
+    const list = cartItems();
+    $('cart-empty').hidden = list.length > 0;
+    $('cart-bar').hidden = !list.length;
+    const total = list.reduce((s, i) => s + (i.price || 0), 0);
+    $('cart-total').textContent = total ? money(total) : '';
+    $('cart-list').replaceChildren(...list.map((it) => h('div', { class: 'cart-row' },
+      h('a', { class: 'cart-link', href: '#item/' + it.id },
+        h('div', { class: 'row-img' }, thumbImg(it)),
+        h('div', { class: 'row-main' },
+          h('div', { class: 'row-title' }, it.title),
+          h('div', { class: 'row-sub' }, [it.price ? money(it.price) : 'цена по запросу', sizeLabel(it)].filter(Boolean).join(', ')))),
+      h('button', { class: 'cart-del', type: 'button', 'aria-label': 'Убрать из корзины', onclick: () => toggleCart(it.id) }, '×'))));
+  }
+
+  // ---------- поделиться вещью ----------
+  function itemUrl(it) { return location.origin + location.pathname + '#item/' + it.id; }
+  function shareItem(it) {
+    const url = itemUrl(it);
+    const text = it.title + (it.price ? ' — ' + money(it.price) : '');
+    const tgShare = 'https://t.me/share/url?url=' + encodeURIComponent(url) + '&text=' + encodeURIComponent(text);
+    if (inTg && tg.openTelegramLink) return tg.openTelegramLink(tgShare);
+    if (navigator.share) return navigator.share({ title: it.title, text, url }).catch(() => {});
+    openLink(tgShare);
   }
 
   // ---------- карточки ----------
@@ -510,6 +595,11 @@
     const step = (d) => track.scrollBy({ left: d * track.clientWidth, behavior: 'smooth' });
     const sold = it.status !== 'available';
     const specs = [['Размер', it.size], ['Состояние', it.condition]].filter((r) => r[1]);
+    const inCart = state.cart.has(it.id);
+    const cartBtn = h('button', {
+      class: 'btn' + (inCart ? ' btn-quiet' : ''), type: 'button', 'data-cart': it.id, 'aria-pressed': inCart,
+      onclick: () => toggleCart(it.id),
+    }, h('span', {}, inCart ? 'В корзине' : 'В корзину'));
 
     root.replaceChildren(h('div', { class: 'sheet-inner' },
       backBtn(),
@@ -528,10 +618,11 @@
         it.msgId && state.config.channel ? ext({ class: 'post-link' }, `https://t.me/${state.config.channel}/${it.msgId}`, 'Открыть пост в канале') : null,
         state.admin ? h('div', {}, h('a', { class: 'post-link', href: '#edit/' + it.id }, 'Редактировать вещь')) : null),
       h('div', { class: 'item-bar' },
-        h('button', { class: 'heart-lg', type: 'button', 'data-fav': it.id, 'aria-pressed': state.fav.has(it.id), html: HEART, onclick: (e) => toggleFav(it.id, e.currentTarget) }),
+        h('button', { class: 'heart-lg', type: 'button', 'data-fav': it.id, 'aria-pressed': state.fav.has(it.id), 'aria-label': 'В избранное', html: HEART, onclick: (e) => toggleFav(it.id, e.currentTarget) }),
+        h('button', { class: 'heart-lg', type: 'button', 'aria-label': 'Поделиться вещью', html: SHARE, onclick: () => shareItem(it) }),
         sold && it.status === 'sold'
           ? ext({ class: 'btn btn-quiet' }, sellerUrl(), 'Спросить о похожих')
-          : ext({ class: 'btn' }, sellerUrl(orderText(it)), 'Написать продавцу'))));
+          : [sold ? null : cartBtn, ext({ class: 'btn' }, sellerUrl(orderText(it)), 'Написать')])));
     root.scrollTop = 0;
   }
   function backBtn() { return h('button', { class: 'back', type: 'button', 'aria-label': 'Назад', html: BACK, onclick: goBack }); }
@@ -785,6 +876,7 @@
     state.items.forEach((i) => { delete i._hay; });
     renderCatalog();
     refreshFavUi();
+    refreshCartUi();
     if (state.admin) renderAdmin();
   }
 
@@ -809,12 +901,13 @@
     if (overlay === 'editor') return name === 'owner' ? renderOwnerLogin() : name === 'editinfo' ? renderInfoEditor() : renderEditor(arg);
 
     state.depth = 0;
-    const tab = ['fav', 'info'].includes(name) ? name : name === 'admin' && state.admin ? 'admin' : 'catalog';
+    const tab = ['fav', 'cart', 'info'].includes(name) ? name : name === 'admin' && state.admin ? 'admin' : 'catalog';
     if (tab !== state.tab) {
       state.scroll[state.tab] = window.scrollY;
       state.tab = tab;
-      ['catalog', 'fav', 'info', 'admin'].forEach((t) => { $('view-' + t).hidden = t !== tab; });
+      ['catalog', 'fav', 'cart', 'info', 'admin'].forEach((t) => { $('view-' + t).hidden = t !== tab; });
       if (tab === 'fav') renderFav();
+      if (tab === 'cart') renderCart();
       window.scrollTo(0, state.scroll[tab] || 0);
     }
     document.querySelectorAll('#tabbar a').forEach((a) => {
@@ -850,6 +943,7 @@
     $('done-sizes').addEventListener('click', backToFilters);
     $('reset-sheet').addEventListener('click', resetFilterSheet);
     $('reset-sizes').addEventListener('click', () => { state.sizes.clear(); renderCatalog(); });
+    $('cart-send').addEventListener('click', () => openLink(sellerUrl(cartText())));
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape' && /^#(filters|sizes)/.test(location.hash)) goBack();
     });
@@ -896,10 +990,12 @@
     document.querySelector('#tabbar [data-tab="admin"]').hidden = !state.admin;
 
     loadFav();
+    loadCart();
     renderCatalog();
     renderInfo();
     if (state.admin) renderAdmin();
     refreshFavUi();
+    refreshCartUi();
 
     // ссылка вида t.me/бот?startapp=item_123 сразу открывает вещь
     const start = (inTg && tg.initDataUnsafe && tg.initDataUnsafe.start_param) || new URLSearchParams(location.search).get('tgWebAppStartParam') || '';
@@ -909,5 +1005,14 @@
     $('boot').hidden = true;
   }
 
-  boot();
+  // если что-то пошло не так, не оставляем посетителя на вечной заставке: показываем причину и кнопку обновления
+  function bootError() {
+    const el = $('boot');
+    el.hidden = false;
+    el.replaceChildren(h('div', { class: 'boot-err' },
+      h('p', { class: 'boot-title' }, 'Не удалось открыть каталог'),
+      h('p', {}, 'Скорее всего в браузере осталась старая версия приложения. Обновите страницу.'),
+      h('button', { class: 'btn', type: 'button', onclick: () => location.reload() }, 'Обновить')));
+  }
+  boot().catch((e) => { console.error('Каталог не запустился:', e); bootError(); });
 })();
