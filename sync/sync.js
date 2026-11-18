@@ -165,7 +165,11 @@ async function saveUsers() {
       signal: AbortSignal.timeout(30000),
     });
     const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(`${method} ${path}: ${data.message || res.status}`);
+    if (!res.ok) {
+      const err = new Error(`${method} ${path}: ${res.status} ${data.message || ''}`.trim());
+      err.status = res.status;
+      throw err;
+    }
     return data;
   };
   let data = { users: [] };
@@ -175,7 +179,8 @@ async function saveUsers() {
     sha = file.sha;
     data = JSON.parse(Buffer.from(file.content, 'base64').toString('utf8'));
   } catch (e) {
-    if (!/404/.test(e.message)) throw e;
+    // 404 — файла ещё нет, это нормально для первого запуска
+    if (e.status !== 404) throw e;
     data = { users: [] };
   }
   if (!Array.isArray(data.users)) data.users = [];
