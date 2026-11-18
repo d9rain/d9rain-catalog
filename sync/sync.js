@@ -12,6 +12,11 @@ const TOKEN = process.env.BOT_TOKEN || '';
 const BASE = (process.env.TG_API_BASE || 'https://api.telegram.org').replace(/\/$/, '');
 const ADMIN_IDS = (process.env.ADMIN_IDS || '').split(/[,\s]+/).filter(Boolean);
 const CHANNEL_ID = process.env.CHANNEL_ID || '-1002420564843';
+// Приватный репозиторий для данных, которые нельзя показывать покупателям (заказы, список пользователей).
+// Нужен секрет ORDERS_TOKEN — ключ доступа с правом Contents: Read and write на этот репозиторий.
+const ORDERS_TOKEN = process.env.ORDERS_TOKEN || '';
+const USERS_REPO = process.env.USERS_REPO || 'd9rain/d9rain-orders';
+const USERS_FILE = 'data/users.json';
 const REPO = process.env.GITHUB_REPOSITORY || ''; // owner/name
 const TEXT_FIELDS = ['title', 'category', 'size', 'sizes', 'condition', 'price', 'priceFrom', 'description', 'tags'];
 const now = () => Math.floor(Date.now() / 1000);
@@ -39,6 +44,21 @@ async function download(fileId, dest) {
 }
 const notes = [];
 const notify = (text) => notes.push(text);
+
+// кто писал боту в этом запуске
+const seenUsers = new Map();
+function rememberUser(from) {
+  if (!from || from.is_bot) return;
+  const id = String(from.id);
+  const prev = seenUsers.get(id) || { count: 0 };
+  seenUsers.set(id, {
+    id,
+    username: from.username || prev.username || '',
+    name: [from.first_name, from.last_name].filter(Boolean).join(' ') || prev.name || '',
+    lastSeen: now(),
+    count: prev.count + 1,
+  });
+}
 
 function isOurChannel(chat) {
   if (!chat) return false;
@@ -123,11 +143,59 @@ async function onChannelPost(msg, isEdit) {
 }
 
 async function onPrivate(msg, url) {
+  rememberUser(msg.from);
   const text = (msg.text || '').trim();
   if (/^\/id\b/.test(text)) return api('sendMessage', { chat_id: msg.chat.id, text: `Ваш Telegram ID: ${msg.from.id}` });
   const params = { chat_id: msg.chat.id, text: 'Каталог вещей в наличии — по кнопке ниже.' };
   if (url) params.reply_markup = { inline_keyboard: [[{ text: 'Открыть каталог', web_app: { url } }]] };
   return api('sendMessage', params);
+}
+
+async function saveUsers() {
+  if (!seenUsers.size) return;
+  if (!ORDERS_TOKEN) { log('ORDERS_TOKEN не задан — список пользователей не сохраняется'); return; }
+  const ghApi = async (method, path, body) => {
+    const res = await fetch(`https://api.github.com/repos/${USERS_REPO}${path}`, {
+      method,
+      headers: Object.assign(
+        { Authorization: 'Bearer ' + ORDERS_TOKEN, Accept: 'application/vnd.github+json' },
+        body ? { 'content-type': 'application/json' } : {},
+      ),
+      body: body ? JSON.stringify(body) : undefined,
+      signal: AbortSignal.timeout(30000),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(`${method} ${path}: ${data.message || res.status}`);
+    return data;
+  };
+  let data = { users: [] };
+  let sha = null;
+  try {
+    const file = await ghApi('GET', '/contents/' + USERS_FILE);
+    sha = file.sha;
+    data = JSON.parse(Buffer.from(file.content, 'base64').toString('utf8'));
+  } catch (e) {
+    if (!/404/.test(e.message)) throw e;
+    data = { users: [] };
+  }
+  if (!Array.isArray(data.users)) data.users = [];
+  const byId = new Map(data.users.map((u) => [String(u.id), u]));
+  for (const u of seenUsers.values()) {
+    const prev = byId.get(u.id);
+    if (prev) {
+      if (u.username) prev.username = u.username;
+      if (u.name) prev.name = u.name;
+      prev.lastSeen = u.lastSeen;
+      prev.count = (prev.count || 0) + u.count;
+    } else {
+      byId.set(u.id, { id: u.id, username: u.username, name: u.name, firstSeen: u.lastSeen, lastSeen: u.lastSeen, count: u.count });
+    }
+  }
+  data.users = [...byId.values()].sort((a, b) => (b.lastSeen || 0) - (a.lastSeen || 0)).slice(0, 2000);
+  const body = { message: `Пользователи: записано ${seenUsers.size}`, content: Buffer.from(JSON.stringify(data)).toString('base64') };
+  if (sha) body.sha = sha;
+  await ghApi('PUT', '/contents/' + USERS_FILE, body);
+  log(`список пользователей обновлён, всего: ${data.users.length}`);
 }
 
 async function main() {
@@ -181,6 +249,8 @@ async function main() {
       item.updated = now();
     }
   }
+
+  try { await saveUsers(); } catch (e) { log('список пользователей не сохранился:', e.message); }
 
   if (JSON.stringify(catalog) !== before) fs.writeFileSync(CATALOG, JSON.stringify(catalog, null, 0));
   fs.writeFileSync(STATE, JSON.stringify(state));
