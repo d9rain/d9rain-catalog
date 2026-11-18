@@ -122,8 +122,8 @@
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
-      const err = new Error(res.status === 401 ? 'Ключ GitHub не подошёл или истёк. Введите новый во вкладке «Инфо».'
-        : res.status === 403 || res.status === 404 ? 'GitHub отказал в доступе: у ключа нет права записи в этот репозиторий.' : 'GitHub: ' + (data.message || res.status));
+      const err = new Error(res.status === 401 ? 'Ключ не подошёл или истёк — введите новый.'
+        : res.status === 403 || res.status === 404 ? 'У ключа нет доступа к этим данным.' : 'Ошибка: ' + (data.message || res.status));
       err.status = res.status;
       throw err;
     }
@@ -228,7 +228,7 @@
   }
   async function signIn(token) {
     const repo = await gh('GET', '', null, token);
-    if (!repo.permissions || !repo.permissions.push) throw new Error('У этого ключа нет права записи в репозиторий. Создайте ключ с доступом Contents: Read and write.');
+    if (!repo.permissions || !repo.permissions.push) throw new Error('У ключа нет права на сохранение правок.');
     ghToken = token;
     storeToken(token);
     state.admin = true;
@@ -377,8 +377,7 @@
   }
   function ordersErrorText(e) {
     if (e && (e.status === 404 || e.status === 403)) {
-      return 'Нет доступа к репозиторию заказов. Создайте приватный репозиторий ' + ORDERS_REPO +
-        ' и разрешите ключу доступ к нему (Contents: Read and write).';
+      return 'Нет доступа к данным заказов. Проверьте, что в настройках обновлений добавлен ключ ORDERS_TOKEN с правом записи.';
     }
     return (e && e.message) || 'Не удалось загрузить заказы.';
   }
@@ -896,9 +895,9 @@
       h('div', { class: 'sparkle', 'aria-hidden': 'true' }, '✦ ✧ ✦'),
       h('div', { class: 'info-text' }, blocks),
       links.length ? h('div', { class: 'links' }, links) : null,
-      DEMO ? null : h('div', { class: 'owner' }, state.admin
-        ? h('button', { class: 'link-btn', type: 'button', onclick: () => { signOut(); afterAuthChange(); toast('Вы вышли из управления'); } }, 'Выйти из управления')
-        : h('a', { class: 'link-btn', href: '#owner' }, 'Вход для владельца'))));
+      DEMO ? null : (state.admin
+        ? h('div', { class: 'owner' }, h('button', { class: 'link-btn', type: 'button', onclick: () => { signOut(); afterAuthChange(); toast('Вы вышли из управления'); } }, 'Выйти из управления'))
+        : null)));
   }
   function afterAuthChange() {
     document.querySelector('#tabbar [data-tab="admin"]').hidden = !state.admin;
@@ -907,7 +906,7 @@
   }
   function renderOwnerLogin() {
     const root = $('editor');
-    const input = h('input', { type: 'text', placeholder: 'github_pat_…', autocomplete: 'off', autocapitalize: 'off', spellcheck: 'false' });
+    const input = h('input', { type: 'text', placeholder: 'вставьте ключ', autocomplete: 'off', autocapitalize: 'off', spellcheck: 'false' });
     const btn = h('button', { class: 'btn', type: 'button' }, 'Войти');
     btn.addEventListener('click', async () => {
       const token = input.value.trim();
@@ -924,9 +923,9 @@
     });
     root.replaceChildren(h('div', { class: 'sheet-inner form' },
       backBtn(),
-      h('h1', {}, 'Вход для владельца'),
-      h('label', { class: 'field' }, h('span', {}, 'Ключ GitHub'), input,
-        h('div', { class: 'field-hint' }, 'Вставьте ключ доступа GitHub с правом записи в репозиторий каталога. Он хранится только на ваших устройствах и нужен, чтобы сохранять правки. Как его получить — в README.')),
+      h('h1', {}, 'Доступ владельца'),
+      h('label', { class: 'field' }, h('span', {}, 'Ключ доступа'), input,
+        h('div', { class: 'field-hint' }, 'Служебный ключ владельца. Хранится только на ваших устройствах и нужен, чтобы сохранять правки в каталоге.')),
       h('div', { class: 'item-bar' }, btn)));
   }
 
@@ -1349,6 +1348,24 @@
     $('reset-sheet').addEventListener('click', resetFilterSheet);
     $('reset-sizes').addEventListener('click', () => { state.sizes.clear(); renderCatalog(); });
     $('cart-send').addEventListener('click', () => openLink(sellerUrl(cartText())));
+
+    // скрытый вход владельца: пять быстрых нажатий по логотипу в шапке каталога
+    const logo = document.querySelector('#view-catalog .wordmark');
+    if (logo) {
+      let taps = 0;
+      let tapTimer = 0;
+      logo.addEventListener('click', () => {
+        taps++;
+        clearTimeout(tapTimer);
+        tapTimer = setTimeout(() => { taps = 0; }, 1500);
+        if (taps >= 5) {
+          taps = 0;
+          clearTimeout(tapTimer);
+          haptic();
+          location.hash = state.admin ? '#admin' : '#owner';
+        }
+      });
+    }
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape' && /^#(filters|sizes)/.test(location.hash)) goBack();
     });
