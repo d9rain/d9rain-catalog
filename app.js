@@ -1202,6 +1202,14 @@
   // ---------- навигация ----------
   state.depth = 0;
   function route() {
+    // страховка: если какой-то экран не отрисовался, показываем сообщение, а не пустой чёрный экран
+    try { routeScreen(); } catch (e) {
+      console.error('Экран не открылся:', e);
+      toast('Не удалось открыть экран. Обновите страницу.', true);
+    }
+  }
+
+  function routeScreen() {
     const hash = location.hash.replace(/^#/, '');
     const [name, arg] = hash.split('/');
     const isSheet = name === 'filters' || name === 'sizes';
@@ -1220,6 +1228,7 @@
 
     if (overlay === 'filters') return; // содержимое шторок уже отрисовано в renderFilters()
     if (overlay === 'orders') return name === 'orders' ? renderOrders() : renderOrderEditor(arg);
+    if (overlay === 'item') return renderItem(arg);
     if (overlay === 'editor') return name === 'owner' ? renderOwnerLogin() : name === 'editinfo' ? renderInfoEditor() : renderEditor(arg);
 
     state.depth = 0;
