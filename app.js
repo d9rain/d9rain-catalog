@@ -15,6 +15,7 @@
     q: '', cat: '', sizes: new Set(), sort: 'new', fav: new Set(), cart: new Set(),
     tab: 'catalog', scroll: {}, adminFilter: 'available', adminQ: '',
     orders: [], ordersError: '', orderFilter: 'active', orderGroup: 'orders', orderQ: '', orderDraft: null,
+    users: [], usersError: '', usersQ: '',
   };
 
   const SIZE_ORDER = ['XXS', 'XS', 'S', 'M', 'L', 'XL', '2XL', '3XL', '4XL', '5XL', 'One Size'];
@@ -654,6 +655,75 @@
     root.scrollTop = 0;
   }
 
+  // ---------- пользователи бота ----------
+  // Список ведёт синхронизация: она записывает каждого, кто написал боту (у неё есть BOT_TOKEN).
+  const USERS_FILE = 'data/users.json';
+  async function loadUsers() {
+    if (!state.admin) return [];
+    try {
+      const r = await gh('GET', '/contents/' + USERS_FILE, null, null, ORDERS_REPO);
+      const data = r && r.content ? JSON.parse(b64decode(r.content)) : { users: [] };
+      state.users = Array.isArray(data.users) ? data.users : [];
+      state.usersError = '';
+    } catch (e) {
+      state.users = [];
+      state.usersError = (e && (e.status === 404 || e.status === 403))
+        ? 'Файл с пользователями ещё не создан. Он появится после ближайшей синхронизации — проверьте, что в Actions добавлен секрет ORDERS_TOKEN.'
+        : ordersErrorText(e);
+    }
+    return state.users;
+  }
+  const fmtDay = (ts) => (ts ? new Date(ts * 1000).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' }) : '');
+  function renderUsers() {
+    const root = $('users-sheet');
+    const q = norm(state.usersQ);
+    const list = state.users
+      .filter((u) => !q || norm([u.name, u.username].join(' ')).indexOf(q) >= 0)
+      .slice()
+      .sort((a, b) => (b.lastSeen || 0) - (a.lastSeen || 0));
+
+    const search = h('input', { type: 'search', placeholder: 'Имя или ник', value: state.usersQ, 'aria-label': 'Поиск по пользователям' });
+    search.addEventListener('input', () => { state.usersQ = search.value; renderUsers(); });
+
+    let body;
+    if (state.usersError) {
+      body = h('div', { class: 'empty' },
+        h('p', { class: 'empty-title' }, 'Список недоступен'),
+        h('p', {}, state.usersError),
+        h('button', { class: 'btn btn-quiet', type: 'button', onclick: (e) => { e.currentTarget.disabled = true; loadUsers().then(renderUsers); } }, 'Проверить снова'));
+    } else if (!list.length) {
+      body = h('div', { class: 'empty' },
+        h('p', { class: 'empty-title' }, 'Пока никого'),
+        h('p', {}, 'Сюда попадают те, кто написал боту. Список обновится после следующей синхронизации.'));
+    } else {
+      body = h('div', { class: 'usr-list' }, list.map((u) => {
+        const initial = String(u.name || u.username || '?').trim().charAt(0).toUpperCase();
+        const inner = [
+          h('span', { class: 'usr-ava' }, initial),
+          h('div', { class: 'usr-main' },
+            h('div', { class: 'usr-name' }, u.name || (u.username ? '@' + u.username : 'Без имени'),
+              u.name && u.username ? h('span', { class: 'usr-user' }, ' @' + u.username) : null),
+            h('div', { class: 'usr-meta' },
+              [u.firstSeen ? 'пришёл ' + fmtDay(u.firstSeen) : '',
+                u.count ? u.count + ' ' + plural(u.count, 'сообщение', 'сообщения', 'сообщений') : ''].filter(Boolean).join(' · '))),
+        ];
+        return u.username
+          ? h('a', { class: 'usr-row', href: 'https://t.me/' + u.username, 'data-ext': '1' }, ...inner)
+          : h('div', { class: 'usr-row' }, ...inner);
+      }));
+    }
+
+    root.replaceChildren(
+      h('div', { class: 'sheet-head no-back' },
+        h('h1', {}, 'Пользователи' + (state.users.length ? ' · ' + state.users.length : '')),
+        h('button', { class: 'icon-btn', type: 'button', 'aria-label': 'Закрыть', html: CLOSE, onclick: goBack })),
+      h('div', { class: 'sheet-inner orders-inner' },
+        h('label', { class: 'search' }, h('span', { html: svg('m20 20-3.6-3.6', '<circle cx="11" cy="11" r="7"/>') }), search),
+        body,
+        h('div', { class: 'usr-note' }, 'Здесь только те, кто писал боту. Открытия каталога по кнопке Telegram боту не сообщает — таких людей он не видит.')));
+    root.scrollTop = 0;
+  }
+
   // ---------- пост в канале ----------
   // своей ссылки на сайт не отправляем: кнопка открывает сам пост, оттуда штатная «Пересылка»
   function postUrl(it) {
@@ -941,7 +1011,7 @@
     if (hash === 'sizes') return backToFilters();
     if (hash === 'filters') return closeSheets();
     if (hash.indexOf('order/') === 0) { if (state.depth > 1) { state.depth--; history.back(); } else location.replace('#orders'); return; }
-    if (hash === 'orders') return backToAdmin();
+    if (hash === 'orders' || hash === 'users') return backToAdmin();
     if (history.length > 1 && state.depth > 0) history.back(); else location.hash = '';
   }
   function backToAdmin() {
@@ -988,7 +1058,8 @@
         h('a', { class: 'btn', href: '#edit/new' }, 'Добавить вещь'),
         h('a', { class: 'btn btn-quiet', href: '#editinfo' }, 'Текст «Инфо»')),
       h('div', { class: 'admin-actions' },
-        h('a', { class: 'btn btn-quiet', href: '#orders' }, 'Заказы под заказ')),
+        h('a', { class: 'btn btn-quiet', href: '#orders' }, 'Заказы под заказ'),
+        h('a', { class: 'btn btn-quiet', href: '#users' }, 'Пользователи')),
       h('label', { class: 'search' }, h('span', { html: svg('m20 20-3.6-3.6', '<circle cx="11" cy="11" r="7"/>') }), search),
       h('div', { class: 'seg' }, seg),
       rows));
@@ -1214,7 +1285,8 @@
     const [name, arg] = hash.split('/');
     const isSheet = name === 'filters' || name === 'sizes';
     const isOrders = name === 'orders' || name === 'order';
-    const overlay = name === 'item' ? 'item' : isSheet ? 'filters' : isOrders ? 'orders'
+    const isUsers = name === 'users';
+    const overlay = name === 'item' ? 'item' : isSheet ? 'filters' : isOrders ? 'orders' : isUsers ? 'users'
       : name === 'owner' && !state.admin && !DEMO ? 'editor' : (name === 'edit' || name === 'editinfo') && state.admin ? 'editor' : null;
     $('item').hidden = overlay !== 'item';
     $('editor').hidden = overlay !== 'editor';
@@ -1222,12 +1294,14 @@
     $('sizes-sheet').hidden = name !== 'sizes';
     $('orders-sheet').hidden = name !== 'orders';
     $('order-sheet').hidden = name !== 'order';
+    $('users-sheet').hidden = name !== 'users';
     document.body.style.overflow = overlay ? 'hidden' : '';
     $('tabbar').hidden = !!overlay;
     if (inTg && tg.BackButton) { if (overlay) tg.BackButton.show(); else tg.BackButton.hide(); }
 
     if (overlay === 'filters') return; // содержимое шторок уже отрисовано в renderFilters()
     if (overlay === 'orders') return name === 'orders' ? renderOrders() : renderOrderEditor(arg);
+    if (overlay === 'users') { renderUsers(); loadUsers().then(renderUsers); return; }
     if (overlay === 'item') return renderItem(arg);
     if (overlay === 'editor') return name === 'owner' ? renderOwnerLogin() : name === 'editinfo' ? renderInfoEditor() : renderEditor(arg);
 

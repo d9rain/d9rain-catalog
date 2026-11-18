@@ -17,7 +17,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23050507'/%3E%3Ctext x='16' y='22' font-family='Arial,sans-serif' font-size='14' font-weight='800' font-style='italic' fill='%23dcecfb' text-anchor='middle'%3ED9%3C/text%3E%3C/svg%3E">
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <!-- при обновлении app.js или styles.css поднимайте ?v= — иначе браузер и Telegram могут смешать новую страницу со старым скриптом -->
-<link rel="stylesheet" href="styles.css?v=6">
+<link rel="stylesheet" href="styles.css?v=7">
 </head>
 <body>
 <main id="app">
@@ -137,6 +137,7 @@
 
 <div id="orders-sheet" class="sheet" hidden role="dialog" aria-label="Заказы"></div>
 <div id="order-sheet" class="sheet" hidden role="dialog" aria-label="Заказ"></div>
+<div id="users-sheet" class="sheet" hidden role="dialog" aria-label="Пользователи"></div>
 
 <nav id="tabbar" class="tabbar" aria-label="Разделы">
   <a href="#" data-tab="catalog"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z"/></svg><span>Каталог</span></a>
@@ -148,6 +149,6 @@
 
 <div id="toast" class="toast" role="status" hidden></div>
 <div id="boot" class="boot">Загружаем каталог…</div>
-<script src="app.js?v=6"></script>
+<script src="app.js?v=7"></script>
 </body>
 </html>
