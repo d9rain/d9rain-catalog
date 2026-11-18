@@ -103,6 +103,28 @@ function statusFromText(text) {
 
 const STATUS_TAGS = /^#(вналичии|продан[а-яё]*|едут|подзаказ|выкуп|инфо)$/i;
 
+// Служебные строки, которые добавляются в каждый пост (подпись бота, призывы писать).
+// В описании вещи они не нужны — иначе покупатель видит их в карточке.
+const SERVICE_LINES = [
+  /удобн\p{L}*\s+бот/iu,
+  /бот\s+для\s+поиска/iu,
+  /поиска\s+вещей\s+в\s+наличии/iu,
+  /t\.me\/d9rainbot/i,
+  /@d9rainbot/i,
+  /по\s+всем\s+вопросам/iu,
+];
+const isServiceLine = (line) => SERVICE_LINES.some((re) => re.test(String(line || '')));
+
+// Чистит готовое описание от служебных строк: нужно и для вещей, сохранённых раньше.
+function cleanDescription(text) {
+  return String(text || '')
+    .split('\n')
+    .filter((l) => !isServiceLine(l))
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
 function cleanTitle(line) {
   return String(line || '')
     .replace(/[^\S\n]+/g, ' ')
@@ -127,11 +149,11 @@ function parseCaption(caption) {
     if (!size && (m = l.match(/^размер(?:ы)?\s*:?\s*(.+)$/i)) && !/^и\s/i.test(m[1])) { size = m[1].replace(/\s+,/g, ',').trim(); return; }
     if (!condition && (m = l.match(/^состояние\s*:?\s*(.+)$/i))) { condition = m[1].replace(/\s+,/g, ',').trim(); return; }
     if (/^цена\s*:?\s*[\d\s. ]+\s*(₽|р|руб)?\.?\s*$/i.test(l)) return; // чистая строка цены уходит в поле
-    if (/по всем вопросам/i.test(l)) return;
+    if (isServiceLine(l)) return;
     if (l && l.split(' ').every((w) => /^#/.test(w))) return; // строка из одних хэштегов
     rest.push(l.replace(/\s+,/g, ','));
   });
-  const description = rest.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+  const description = cleanDescription(rest.join('\n'));
   const { price, priceFrom } = parsePrice(text);
   const tags = hashtags(text).filter((t) => !STATUS_TAGS.test(t));
   return {
@@ -140,6 +162,6 @@ function parseCaption(caption) {
   };
 }
 
-const api = { parseCaption, normalizeSizes, detectCategory, statusFromText, sizeRank, hashtags, CATEGORIES };
+const api = { parseCaption, normalizeSizes, detectCategory, statusFromText, sizeRank, hashtags, CATEGORIES, cleanDescription, isServiceLine };
 if (typeof module !== 'undefined' && module.exports) module.exports = api; else window.D9Parse = api;
 })();

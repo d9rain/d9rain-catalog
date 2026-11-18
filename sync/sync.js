@@ -3,7 +3,7 @@
 // Забирает у бота новые посты канала и их правки, обновляет data/catalog.json и скачивает фото.
 const fs = require('fs');
 const path = require('path');
-const { parseCaption, statusFromText } = require('./parse');
+const { parseCaption, statusFromText, cleanDescription } = require('./parse');
 
 const ROOT = path.join(__dirname, '..');
 const CATALOG = path.join(ROOT, 'data', 'catalog.json');
@@ -170,6 +170,17 @@ async function main() {
   }
   // раз в неделю обновляем отметку, чтобы GitHub не отключил планировщик из-за «неактивного» репозитория
   if (!state.beat || now() - state.beat > 7 * 86400) state.beat = now();
+
+  // одноразовая (и безопасная при повторе) чистка: убираем из описаний служебные подписи,
+  // которые раньше попадали в карточку вещи вместе с текстом поста
+  for (const item of catalog.items) {
+    if (!item.description) continue;
+    const cleaned = cleanDescription(item.description);
+    if (cleaned !== item.description) {
+      item.description = cleaned;
+      item.updated = now();
+    }
+  }
 
   if (JSON.stringify(catalog) !== before) fs.writeFileSync(CATALOG, JSON.stringify(catalog, null, 0));
   fs.writeFileSync(STATE, JSON.stringify(state));
