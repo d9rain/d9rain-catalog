@@ -32,6 +32,7 @@ jobs:
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           ADMIN_IDS: ${{ vars.ADMIN_IDS }}
+          ORDERS_TOKEN: ${{ secrets.ORDERS_TOKEN }}
 
       - name: Сохранить изменения
         id: commit
